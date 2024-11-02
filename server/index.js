@@ -1,3 +1,4 @@
+// server.js
 const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
@@ -5,55 +6,44 @@ const { Server } = require("socket.io");
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
-  cors: {
-    origin: "http://localhost:3000", // Allow your frontend origin
-    methods: ["GET", "POST"],
-  },
+  cors: { origin: "http://localhost:3000", methods: ["GET", "POST"] },
 });
+
+const rooms = {};
 
 io.on("connection", (socket) => {
   console.log("User connected:", socket.id);
 
   socket.on("join-room", (roomId) => {
     socket.join(roomId);
-    console.log(`User ${socket.id} joined room ${roomId}`);
-    
-    // Notify others in the room about the new user
-    socket.to(roomId).emit("user-connected", socket.id);
+    rooms[roomId] = rooms[roomId] || [];
+    rooms[roomId].push(socket.id);
+    io.to(roomId).emit("user-list", rooms[roomId].filter((id) => id !== socket.id));
   });
 
-  socket.on("offer", (roomId, offer) => {
-    // Send the offer to all other users in the room except the sender
-    socket.to(roomId).emit("offer", socket.id, offer);
+  socket.on("offer", (targetUserId, offer) => {
+    io.to(targetUserId).emit("offer", socket.id, offer);
   });
 
-  socket.on("answer", (roomId, answer) => {
-    // Send the answer to all other users in the room except the sender
-    socket.to(roomId).emit("answer", socket.id, answer);
+  socket.on("answer", (targetUserId, answer) => {
+    io.to(targetUserId).emit("answer", socket.id, answer);
   });
 
-  socket.on("ice-candidate", (roomId, candidate) => {
-    // Forward ICE candidates to other users in the room
-    socket.to(roomId).emit("ice-candidate", socket.id, candidate);
+  socket.on("ice-candidate", (targetUserId, candidate) => {
+    io.to(targetUserId).emit("ice-candidate", socket.id, candidate);
   });
 
-  // Notify others in the room when the user is disconnecting
   socket.on("disconnecting", () => {
-    const rooms = Array.from(socket.rooms); // List of rooms the socket is connected to
-    rooms.forEach((roomId) => {
-      if (roomId !== socket.id) {
-        socket.to(roomId).emit("user-disconnected", socket.id);
-        console.log(`User ${socket.id} is leaving room ${roomId}`);
-      }
+    const roomsJoined = Array.from(socket.rooms);
+    roomsJoined.forEach((roomId) => {
+      rooms[roomId] = rooms[roomId].filter((id) => id !== socket.id);
+      io.to(roomId).emit("user-list", rooms[roomId]);
     });
   });
 
-  // Log user disconnection
   socket.on("disconnect", () => {
     console.log("User disconnected:", socket.id);
   });
 });
 
-server.listen(5000, () => {
-  console.log("Server is running on http://localhost:5000");
-});
+server.listen(5000, () => console.log("Server is running on http://localhost:5000"));
